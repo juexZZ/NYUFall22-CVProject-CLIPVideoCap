@@ -11,3 +11,6 @@ CV_Project_Dataset.zip
 __pycache__
 pycocoevalcap/cider/__pycache__
 pycocoevalcap/meteor/__pycache__
+pycocoevalcap/bleu/__pycache__
+pycocoevalcap/rouge/__pycache__
+pycocoevalcap/tokenizer/__pycache__

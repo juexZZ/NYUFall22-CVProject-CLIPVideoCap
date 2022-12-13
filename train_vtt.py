@@ -10,7 +10,9 @@ import pickle
 import sys
 import argparse
 import json
+import h5py
 from typing import Tuple, Optional, Union
+import numpy as np
 
 
 class MappingType(Enum):
@@ -18,20 +20,31 @@ class MappingType(Enum):
     Transformer = 'transformer'
 
 
-class ClipCocoDataset(Dataset):
-
+class MSRVTTDataset(Dataset):
     def __len__(self) -> int:
-        return len(self.captions_tokens)
+        return len(self.id_list)
+
+    def _msrvtt_create_caption_dict(self, info_file_path):
+        train_val_file = json.load(open(info_file_path))
+        sent_dict = {}
+        for datap in train_val_file['sentences']:
+            if int(datap['video_id'][5:]) in self.id_list:
+                if datap['video_id'] in list(sent_dict.keys()):
+                    sent_dict[datap['video_id']] += [datap['caption']]
+                else:
+                    sent_dict[datap['video_id']] = [datap['caption']]
+        return sent_dict
 
     def pad_tokens(self, item: int):
-        tokens = self.captions_tokens[item]
+        videoid = self.id_list[item]
+        tokens = self.captions_tokens[videoid]
         padding = self.max_seq_len - tokens.shape[0]
         if padding > 0:
             tokens = torch.cat((tokens, torch.zeros(padding, dtype=torch.int64) - 1))
-            self.captions_tokens[item] = tokens
+            self.captions_tokens[videoid] = tokens
         elif padding < 0:
             tokens = tokens[:self.max_seq_len]
-            self.captions_tokens[item] = tokens
+            self.captions_tokens[videoid] = tokens
         mask = tokens.ge(0)  # mask is zero where we out of sequence
         tokens[~mask] = 0
         mask = mask.float()
@@ -40,42 +53,44 @@ class ClipCocoDataset(Dataset):
 
     def __getitem__(self, item: int) -> Tuple[torch.Tensor, ...]:
         tokens, mask = self.pad_tokens(item)
-        prefix = self.prefixes[self.caption2embedding[item]]
+        videoid = self.id_list[item]
+        features = torch.from_numpy(self.all_features["video"+str(videoid)][()]).type(torch.float32)
         if self.normalize_prefix:
-            prefix = prefix.float()
-            prefix = prefix / prefix.norm(2, -1)
-        return tokens, mask, prefix # (28x512)
+            features = features.float()
+            features = features / features.norm(2, -1)
+        return tokens, mask, features # (28x512)
 
-    def __init__(self, data_path: str,  prefix_length: int, gpt2_type: str = "gpt2",
-                 normalize_prefix=False):
+    def __init__(self, feature_path: str, caption_path: str, prefix_length: int, gpt2_type: str = "gpt2",
+                    normalize_prefix=False, split="train"):
+        self.split = split
+        self.id_list = None
+        if split == "train":
+            self.id_list = np.arange(0,6513)
+        elif split == "val":
+            self.id_list = np.arange(6513,7010) # val
         self.tokenizer = GPT2Tokenizer.from_pretrained(gpt2_type)
         self.prefix_length = prefix_length
         self.normalize_prefix = normalize_prefix
-        with open(data_path, 'rb') as f:
-            all_data = pickle.load(f)
-        print("Data size is %0d" % len(all_data["clip_embedding"]))
+        self.all_features = h5py.File(feature_path,'r+')
+        print("Data size is %0d" % len(self.all_features))
         sys.stdout.flush()
-        self.prefixes = all_data["clip_embedding"]
-        captions_raw = all_data["captions"]
-        self.image_ids = [caption["image_id"] for caption in captions_raw]
-        self.captions = [caption['caption'] for caption in captions_raw]
-        if os.path.isfile(f"{data_path[:-4]}_tokens.pkl"):
-            with open(f"{data_path[:-4]}_tokens.pkl", 'rb') as f:
-                self.captions_tokens, self.caption2embedding, self.max_seq_len = pickle.load(f)
+        if os.path.isfile(f"{self.split}_tokens.pkl"):
+            with open(f"./CV_Project_Dataset/{self.split}_tokens.pkl", 'rb') as f:
+                self.captions_tokens, self.max_seq_len = pickle.load(f)
         else:
-            self.captions_tokens = []
-            self.caption2embedding = []
+            self.sent_dict = self._msrvtt_create_caption_dict(caption_path)
+            self.captions_tokens = {} # {idx : tokens}
             max_seq_len = 0
-            for caption in captions_raw:
-                self.captions_tokens.append(torch.tensor(self.tokenizer.encode(caption['caption']), dtype=torch.int64))
-                self.caption2embedding.append(caption["clip_embedding"])
-                max_seq_len = max(max_seq_len, self.captions_tokens[-1].shape[0])
-            # self.max_seq_len = max_seq_len
-            with open(f"{data_path[:-4]}_tokens.pkl", 'wb') as f:
-                pickle.dump([self.captions_tokens, self.caption2embedding, max_seq_len], f)
-        all_len = torch.tensor([len(self.captions_tokens[i]) for i in range(len(self))]).float()
+            for idx in self.id_list:
+                pick_sentence = self.sent_dict['video'+str(idx)][0] # only pick the first one for now
+                self.captions_tokens[idx] = torch.tensor(self.tokenizer.encode(pick_sentence), dtype=torch.int64)
+                max_seq_len = max(max_seq_len, self.captions_tokens[idx].shape[0])
+            with open(f"./CV_Project_Dataset/{self.split}_tokens.pkl", 'wb') as wf:
+                pickle.dump([self.captions_tokens, max_seq_len], wf)
+            
+        all_len = torch.tensor([len(self.captions_tokens[i]) for i in self.id_list]).float()
         self.max_seq_len = min(int(all_len.mean() + all_len.std() * 10), int(all_len.max()))
-
+        print("max sequence len", self.max_seq_len)
 
 class MLP(nn.Module):
 
@@ -203,7 +218,11 @@ class Transformer(nn.Module):
 class TransformerMapper(nn.Module):
 
     def forward(self, x):
-        x = self.linear(x).view(x.shape[0], self.clip_length, -1)
+        # x: B x 28 x 512
+        feature_dim = x.shape[2]
+        batch_size = x.shape[0]
+        x = x.view(-1, feature_dim)
+        x = self.linear(x).view(batch_size, self.clip_length, -1) # (B x 28 x gptdim)
         prefix = self.prefix_const.unsqueeze(0).expand(x.shape[0], *self.prefix_const.shape)
         prefix = torch.cat((x, prefix), dim=1)
         out = self.transformer(prefix)[:, self.clip_length:]
@@ -211,14 +230,32 @@ class TransformerMapper(nn.Module):
 
     def __init__(self, dim_clip: int, dim_embedding: int, prefix_length: int, clip_length: int, num_layers: int = 8):
         super(TransformerMapper, self).__init__()
-        self.clip_length = clip_length
+        self.clip_length = clip_length # 28
         self.transformer = Transformer(dim_embedding, 8, num_layers)
-        self.linear = nn.Linear(dim_clip, clip_length * dim_embedding) # we can change here to adapt multi-frame, or we can try multi-layer cross attention, using const as queries
+        self.linear = nn.Linear(dim_clip, dim_embedding) # we can change here to adapt multi-frame, or we can try multi-layer cross attention, using const as queries
         self.prefix_const = nn.Parameter(torch.randn(prefix_length, dim_embedding), requires_grad=True)
 
 class CrossTransformerMapper(nn.Module):
-    # TODO
-    pass
+    def forward(self, x):
+        # x: B x 28 x 512
+        feature_dim = x.shape[2]
+        batch_size = x.shape[0]
+        x = x.view(-1, feature_dim)
+        x = self.linear(x).view(batch_size, self.clip_length, -1) # as keys and values
+        prefix = self.prefix_const.unsqueeze(0).expand(x.shape[0], *self.prefix_const.shape) # as queries
+        # prefix = torch.cat((x, prefix), dim=1)
+        # print("prefix", prefix.size(), "x", x.size())
+        out = self.transformer(prefix, x) #[:, self.clip_length:]
+        # print("out", out.size())
+        return out
+
+    def __init__(self, dim_clip: int, dim_embedding: int, prefix_length: int, clip_length: int, num_layers: int = 8):
+        super(CrossTransformerMapper, self).__init__()
+        self.clip_length = clip_length
+        self.transformer = Transformer(dim_embedding, 8, num_layers)
+        self.linear = nn.Linear(dim_clip, dim_embedding) # we can change here to adapt multi-frame, or we can try multi-layer cross attention, using const as queries
+        self.prefix_const = nn.Parameter(torch.randn(prefix_length, dim_embedding), requires_grad=True)
+
 
 class ClipCaptionModel(nn.Module):
 
@@ -237,7 +274,7 @@ class ClipCaptionModel(nn.Module):
         return out
 
     def __init__(self, prefix_length: int, clip_length: Optional[int] = None, prefix_size: int = 512,
-                 num_layers: int = 8, mapping_type: MappingType = MappingType.MLP):
+                 num_layers: int = 8, mapping_type: MappingType = MappingType.MLP, if_cross = False):
         super(ClipCaptionModel, self).__init__()
         self.prefix_length = prefix_length
         self.gpt = GPT2LMHeadModel.from_pretrained('gpt2')
@@ -245,6 +282,10 @@ class ClipCaptionModel(nn.Module):
         if mapping_type == MappingType.MLP:
             self.clip_project = MLP((prefix_size, (self.gpt_embedding_size * prefix_length) // 2,
                                      self.gpt_embedding_size * prefix_length))
+        elif if_cross:
+            print("make cross attention")
+            self.clip_project = CrossTransformerMapper(prefix_size, self.gpt_embedding_size, prefix_length,
+                                                                     clip_length, num_layers)
         else:
             self.clip_project = TransformerMapper(prefix_size, self.gpt_embedding_size, prefix_length,
                                                                      clip_length, num_layers)
@@ -291,7 +332,7 @@ def load_model(config_path: str, epoch_or_latest: Union[str, int] = '_latest'):
     return model, parser
 
 
-def train(dataset: ClipCocoDataset, model: ClipCaptionModel, args,
+def train(dataset: MSRVTTDataset, model: ClipCaptionModel, args,
           lr: float = 2e-5, warmup_steps: int = 5000, output_dir: str = ".", output_prefix: str = ""):
 
     device = torch.device('cuda:0')
@@ -339,13 +380,15 @@ def train(dataset: ClipCocoDataset, model: ClipCaptionModel, args,
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data', default='./data/coco/oscar_split_train.pkl')
-    parser.add_argument('--out_dir', default='./checkpoints')
-    parser.add_argument('--prefix', default='coco_prefix', help='prefix for saved filenames')
+    parser.add_argument('--data', default='./CV_Project_Dataset/MSRVTT_TRNVAL_CLIP_FEATURES.hdf5')
+    parser.add_argument('--caption', default='./CV_Project_Dataset/train_val_videodatainfo.json')
+    parser.add_argument('--out_dir', default='./msrvtt-checkpoints')
+    parser.add_argument('--cross', dest='cross', action='store_true')
+    parser.add_argument('--prefix', default='msrvtt_prefix', help='prefix for saved filenames')
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--save_every', type=int, default=1)
     parser.add_argument('--prefix_length', type=int, default=10)
-    parser.add_argument('--prefix_length_clip', type=int, default=10)
+    parser.add_argument('--prefix_length_clip', type=int, default=28, help='set to number of frames')
     parser.add_argument('--bs', type=int, default=40)
     parser.add_argument('--only_prefix', dest='only_prefix', action='store_true')
     parser.add_argument('--mapping_type', type=str, default='mlp', help='mlp/transformer')
@@ -354,12 +397,13 @@ def main():
     parser.add_argument('--normalize_prefix', dest='normalize_prefix', action='store_true')
     args = parser.parse_args()
     prefix_length = args.prefix_length
-    dataset = ClipCocoDataset(args.data, prefix_length, normalize_prefix=args.normalize_prefix)
+    dataset = MSRVTTDataset(args.data, args.caption, prefix_length=prefix_length)
+    # dataset = ClipCocoDataset(args.data, prefix_length, normalize_prefix=args.normalize_prefix)
     prefix_dim = 640 if args.is_rn else 512
     args.mapping_type = {'mlp': MappingType.MLP, 'transformer': MappingType.Transformer}[args.mapping_type]
     if args.only_prefix:
         model = ClipCaptionPrefix(prefix_length, clip_length=args.prefix_length_clip, prefix_size=prefix_dim,
-                                  num_layers=args.num_layers, mapping_type=args.mapping_type)
+                                  num_layers=args.num_layers, mapping_type=args.mapping_type, if_cross=args.cross)
         print("Train only prefix")
     else:
         model = ClipCaptionModel(prefix_length, clip_length=args.prefix_length_clip, prefix_size=prefix_dim,

@@ -1,0 +1,10 @@
+.idea
+coco_train/
+CV_Project_Dataset/
+!CV_Project_Dataset/DataSet.ipynb
+data/
+Images/
+msrvtt-train/
+msrvtt-train-cross/
+msrvtt-train-cross-ft/
+CV_Project_Dataset.zip

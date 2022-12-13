@@ -28,7 +28,10 @@ def main(clip_model_type: str):
         image = io.imread(filename)
         image = preprocess(Image.fromarray(image)).unsqueeze(0).to(device)
         with torch.no_grad():
-            prefix = clip_model.encode_image(image).cpu()
+            prefix = clip_model.encode_image(image).cpu() # B datapoint (B, 3, 224, 224) -> (B, 512), B captions
+            # 1 caption -> 1 feature (512)
+            # video : 1 video -> 28 frames, (28, 3, 224, 224) -> (28, 512) -> 1 caption
+            # 1 caption -> 1 feature: (28 x 512)
         d["clip_embedding"] = i
         all_embeddings.append(prefix)
         all_captions.append(d)

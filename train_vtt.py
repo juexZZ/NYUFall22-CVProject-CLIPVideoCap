@@ -33,6 +33,10 @@ class MSRVTTDataset(Dataset):
                     sent_dict[datap['video_id']] += [datap['caption']]
                 else:
                     sent_dict[datap['video_id']] = [datap['caption']]
+        if self.split == "val":
+            if not os.path.isfile(f"./CV_Project_Dataset/{self.split}_dict.json"):
+                with open(f"./CV_Project_Dataset/{self.split}_dict.json", 'w') as wf:
+                    json.dump(sent_dict, wf)
         return sent_dict
 
     def pad_tokens(self, item: int):
@@ -58,7 +62,10 @@ class MSRVTTDataset(Dataset):
         if self.normalize_prefix:
             features = features.float()
             features = features / features.norm(2, -1)
-        return tokens, mask, features # (28x512)
+        if self.split == "val":
+            return tokens, mask, features, videoid
+        else:
+            return tokens, mask, features # (28x512)
 
     def __init__(self, feature_path: str, caption_path: str, prefix_length: int, gpt2_type: str = "gpt2",
                     normalize_prefix=False, split="train"):
@@ -67,7 +74,7 @@ class MSRVTTDataset(Dataset):
         if split == "train":
             self.id_list = np.arange(0,6513)
         elif split == "val":
-            self.id_list = np.arange(6513,7010) # val
+            self.id_list = np.concatenate([np.arange(6513,6748),np.arange(6749, 7010)]) #NO 6748 np.arange(6513,7010) # val
         self.tokenizer = GPT2Tokenizer.from_pretrained(gpt2_type)
         self.prefix_length = prefix_length
         self.normalize_prefix = normalize_prefix
@@ -397,7 +404,7 @@ def main():
     parser.add_argument('--normalize_prefix', dest='normalize_prefix', action='store_true')
     args = parser.parse_args()
     prefix_length = args.prefix_length
-    dataset = MSRVTTDataset(args.data, args.caption, prefix_length=prefix_length)
+    dataset = MSRVTTDataset(args.data, args.caption, prefix_length=prefix_length, split="train")
     # dataset = ClipCocoDataset(args.data, prefix_length, normalize_prefix=args.normalize_prefix)
     prefix_dim = 640 if args.is_rn else 512
     args.mapping_type = {'mlp': MappingType.MLP, 'transformer': MappingType.Transformer}[args.mapping_type]
@@ -407,7 +414,7 @@ def main():
         print("Train only prefix")
     else:
         model = ClipCaptionModel(prefix_length, clip_length=args.prefix_length_clip, prefix_size=prefix_dim,
-                                  num_layers=args.num_layers, mapping_type=args.mapping_type)
+                                  num_layers=args.num_layers, mapping_type=args.mapping_type, if_cross=args.cross)
         print("Train both prefix and GPT")
         sys.stdout.flush()
     train(dataset, model, args, output_dir=args.out_dir, output_prefix=args.prefix)

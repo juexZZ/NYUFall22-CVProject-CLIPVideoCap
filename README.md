@@ -10,27 +10,22 @@
 
 
 
-
-
 ## implementation for the report ["ClIP Prefix for Video Caption Generation"](https://arxiv.org/abs/2111.09734)
-
-
 
 
 ## Description  
 Contrastive models like CLIP have demonstrated impressive ability in learning robust and high quality visual represetations and have sparked many promising application directions. In this work, we try to leverage the visual embeddings produced by CLIP to tackle the problem of video caption generation. Video captioning is a fundamental task for vision-language understanding, where the model is asked to generate a piece of text description for an input video clip. This task is challenging as it requires wisdom from both video understanding and natural language generation. Therefore, we take advantage of both the high quality visual features produced by CLIP and a pre-trained language generation model, GPT2, to create a simple and light weight model for the video caption generation task. In our model, representation of video frames encoded by CLIP are transformed into prefixes of a sentence and sent to the language model to generate the corresponding caption. Experiments on a public video captioning dataset demonstrated the promising results of our simple method. 
 ## Demos for our Video Captioning  
-
 <table>
   <tr>
-    <td><video src="https://drive.google.com/file/d/1l3vOcCEBSFNW2KdV3SBo0qNFpFLwcXlB/view?usp=share_link" controls="controls" width="300" height="200">not support you browser！</video></td>
-    <td><video src="https://drive.google.com/file/d/1flJbu1EzUGs8uy-6PmSPc9DiVrytN_cJ/view?usp=share_link" controls="controls" width="300" height="200">not support you browser！</video></td>
-    <td><video src="https://drive.google.com/file/d/1YDC9fpwabX1QbvwEuYqZCIfSzkesLiTK/view?usp=share_link" width="300" height="200">not support you browser！</video></td>
+    <td><img src="https://user-images.githubusercontent.com/41601003/207977160-190ba8cb-a1ff-434e-a40c-c6f3990832ac.gif" ></video></td>
+    <td><img src="https://user-images.githubusercontent.com/41601003/207977795-8cc11699-e1b2-4323-bf50-849039caeb8e.gif" ></td>
+    <td><img src="https://user-images.githubusercontent.com/41601003/207977869-03a6a42f-ac20-4488-b2aa-d09d3c04db4a.gif" ></td>
   </tr>
   <tr>
     <td>a girl is talking about how to make a mask</td>
-     <td>a band is performing a song on stage and a</td>
      <td>a man is driving a car in a car and</td>
+     <td>a band is performing a song on stage and a</td>
   </tr>
  </table>
 

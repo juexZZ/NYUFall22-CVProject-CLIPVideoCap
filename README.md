@@ -10,7 +10,7 @@
 
 
 
-## implementation for the report ["ClIP Prefix for Video Caption Generation"](https://arxiv.org/abs/2111.09734)
+## implementation for the report ["ClIP Prefix for Video Caption Generation"](https://drive.google.com/file/d/1-RpgQarWn7NpS5WhvOd6aTO5dLWxGZXN/view?usp=share_link)
 
 
 ## Description  
@@ -47,7 +47,7 @@ Extract CLIP features
 Run 'CLIP_feature_extraction.ipynb'
 ```
 
-Train only transformer mapping network:
+Train only transformer mapping network
 ```
 python train_vtt.py --mapping_type transformer --num_layers 8 --prefix_length_clip 28 --bs 40 --only_prefix --save_every 10 --epochs 10 \
 --cross --out_dir cross_length20 --prefix_length 20

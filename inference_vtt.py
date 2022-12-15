@@ -16,10 +16,10 @@ import numpy as np
 sys.path.append('pycocoevalcap/')
 sys.path.append('pycocoevalcap/bleu')
 sys.path.append('pycocoevalcap/cider')
-# from pycocoevalcap.bleu.bleu import Bleu
-# from pycocoevalcap.rouge.rouge import Rouge
+from pycocoevalcap.bleu.bleu import Bleu
+from pycocoevalcap.rouge.rouge import Rouge
 from pycocoevalcap.cider.cider import Cider
-from pycocoevalcap.meteor.meteor import Meteor
+# from pycocoevalcap.meteor.meteor import Meteor
 
 from train_vtt import ClipCaptionModel, ClipCaptionPrefix, MSRVTTDataset, MappingType
 
@@ -31,20 +31,23 @@ def get_score(ref, pred):
         refers: https://github.com/zhegan27/SCN_for_video_captioning/blob/master/SCN_evaluation.py
         """
         scorers = [
-            # (Bleu(4), ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4"]),
-            (Meteor(),"METEOR"),
-            # (Rouge(), "ROUGE_L"),
+            (Bleu(4), ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4"]),
+            # (Meteor(),"METEOR"),
+            (Rouge(), "ROUGE_L"),
             (Cider(), "CIDEr")
         ]
         final_scores = {}
+        example_scores = {}
         for scorer, method in scorers:
-            score, scores = scorer.compute_score(ref, pred)
+            score, scores, vids = scorer.compute_score(ref, pred)
             if type(score) == list:
                 for m, s in zip(method, score):
                     final_scores[m] = s
+                example_scores[method[-1]] = vids
             else:
                 final_scores[method] = score
-        return final_scores
+                example_scores[method] = vids
+        return final_scores, example_scores
 
 
 def load_model(args, model_dir: str, epoch_or_latest: Union[str, int] = '_latest'):
@@ -176,13 +179,13 @@ def generate2(
                 generated = torch.cat((generated, next_token_embed), dim=1)
                 if stop_token_index == next_token.item():
                     break
-
-            output_list = list(tokens.squeeze().cpu().numpy())
+            # print(tokens.size())
+            output_list = list(tokens.squeeze(0).cpu().numpy())
             output_text = tokenizer.decode(output_list)
             generated_list.append(output_text)
     return generated_list[0]
 
-def evaluate(dataset: MSRVTTDataset, model: ClipCaptionModel, use_beam_search):
+def evaluate(dataset: MSRVTTDataset, model: ClipCaptionModel, use_beam_search, entry_length):
     device = torch.device('cuda:0')
     batch_size = 1
     model = model.to(device)
@@ -196,9 +199,9 @@ def evaluate(dataset: MSRVTTDataset, model: ClipCaptionModel, use_beam_search):
             prefix_embed = model.clip_project(prefix).view(-1, model.prefix_length, model.gpt_embedding_size)
         for idx, vid in enumerate(videoids):
             if use_beam_search:
-                generated_text_prefix = generate_beam(model, dataset.tokenizer, embed=prefix_embed[idx].unsqueeze(0))[0]
+                generated_text_prefix = generate_beam(model, dataset.tokenizer, embed=prefix_embed[idx].unsqueeze(0), entry_length=entry_length)[0]
             else:
-                generated_text_prefix = generate2(model, dataset.tokenizer, embed=prefix_embed[idx].unsqueeze(0))
+                generated_text_prefix = generate2(model, dataset.tokenizer, embed=prefix_embed[idx].unsqueeze(0), entry_length=entry_length)
             prediction_list["video"+str(vid.item())] = [generated_text_prefix]
     return prediction_list
 
@@ -219,19 +222,20 @@ def main():
     parser.add_argument('--is_rn', dest='is_rn', action='store_true')
     parser.add_argument('--normalize_prefix', dest='normalize_prefix', action='store_true')
     parser.add_argument('--use_beam_search', dest='use_beam_search', action='store_true')
+    parser.add_argument('--entry_length', type=int, default=10)
     args = parser.parse_args()
     prefix_length = args.prefix_length
     dataset = MSRVTTDataset(args.data, args.caption, prefix_length=prefix_length, split="val")
     reference_list = json.load(open(f"./CV_Project_Dataset/val_dict.json"))
     # dataset = ClipCocoDataset(args.data, prefix_length, normalize_prefix=args.normalize_prefix)
     args.mapping_type = {'mlp': MappingType.MLP, 'transformer': MappingType.Transformer}[args.mapping_type]
-    model = load_model(args, args.model_dir, args.epoch-1)
-    prediction_list = evaluate(dataset, model, use_beam_search=args.use_beam_search)
+    model = load_model(args, args.model_dir, args.epoch)
+    prediction_list = evaluate(dataset, model, use_beam_search=args.use_beam_search, entry_length=args.entry_length)
     save_result_name ="pred_beam.json" if args.use_beam_search else "pred.json"
     json.dump(prediction_list, open(os.path.join(args.model_dir, save_result_name), 'w'))
-    score = get_score(reference_list, prediction_list)
-    # print(score)
+    score, examples = get_score(reference_list, prediction_list)
     json.dump(score,  open(os.path.join(args.model_dir, "score"+save_result_name), 'w'))
+    print(score)
 
 
 

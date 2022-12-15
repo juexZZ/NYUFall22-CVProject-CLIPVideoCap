@@ -102,6 +102,10 @@ class MSRVTTDataset(Dataset):
 class MLP(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        feature_dim = x.shape[2]
+        clip_length = x.shape[1]
+        batch_size = x.shape[0]
+        x = x.view(-1, feature_dim)
         return self.model(x)
 
     def __init__(self, sizes: Tuple[int, ...], bias=True, act=nn.Tanh):
@@ -287,8 +291,10 @@ class ClipCaptionModel(nn.Module):
         self.gpt = GPT2LMHeadModel.from_pretrained('gpt2')
         self.gpt_embedding_size = self.gpt.transformer.wte.weight.shape[1]
         if mapping_type == MappingType.MLP:
-            self.clip_project = MLP((prefix_size, (self.gpt_embedding_size * prefix_length) // 2,
-                                     self.gpt_embedding_size * prefix_length))
+            # self.clip_project = MLP((prefix_size, (self.gpt_embedding_size * prefix_length) // 2,
+            #                          self.gpt_embedding_size * prefix_length))
+            self.clip_project = MLP((prefix_size, self.gpt_embedding_size // 2,
+                                     self.gpt_embedding_size))
         elif if_cross:
             print("make cross attention")
             self.clip_project = CrossTransformerMapper(prefix_size, self.gpt_embedding_size, prefix_length,
@@ -377,7 +383,7 @@ def train(dataset: MSRVTTDataset, model: ClipCaptionModel, args,
                     os.path.join(output_dir, f"{output_prefix}_latest.pt"),
                 )
         progress.close()
-        if epoch % args.save_every == 0 or epoch == epochs - 1:
+        if (epoch+1) % args.save_every == 0 or epoch == epochs - 1:
             torch.save(
                 model.state_dict(),
                 os.path.join(output_dir, f"{output_prefix}-{epoch:03d}.pt"),

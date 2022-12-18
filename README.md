@@ -68,7 +68,7 @@ python inference_vtt.py --model_dir cross_length20 --prefix_length 20 --mapping_
 
 
 ## Acknowledgments
-This repository is heavily based on [CLIP](https://github.com/openai/CLIP) and [Hugging-faces](https://github.com/huggingface/transformers) repositories.
+This repository is heavily based on [CLIP](https://github.com/openai/CLIP), [CLIPCap](https://github.com/rmokady/CLIP_prefix_caption) and [Hugging-faces](https://github.com/huggingface/transformers) repositories.
 For training we used the data of [MSR_VTT dataset](https://github.com/nasib-ullah/video-captioning-models-in-Pytorch/tree/main/MSRVTT)
 
 

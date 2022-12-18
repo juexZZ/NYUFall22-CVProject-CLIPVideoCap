@@ -47,13 +47,23 @@ Extract CLIP features
 Run 'CLIP_feature_extraction.ipynb'
 ```
 
-Train only transformer mapping network
+Train only the feature transformation module
 ```
 python train_vtt.py --mapping_type transformer --num_layers 8 --prefix_length_clip 28 --bs 40 --only_prefix --save_every 10 --epochs 10 \
 --cross --out_dir cross_length20 --prefix_length 20
 ```
 
+To fine-tune the GPT-2
+```
+python train_vtt.py --mapping_type transformer --num_layers 8 --prefix_length_clip 28 --bs 40 --save_every 10 --epochs 10 \
+--cross --out_dir cross_length20 --prefix_length 20
+```
 
+To do inference with a trained model:
+```
+python inference_vtt.py --model_dir cross_length20 --prefix_length 20 --mapping_type transformer --cross --entry_length 10 \
+--num_layers 8 --epoch 9
+```
 
 
 
